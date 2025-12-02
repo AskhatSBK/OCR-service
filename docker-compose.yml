@@ -4,7 +4,7 @@ services:
   dots-ocr:
     image: rednotehilab/dots.ocr:vllm-openai-v0.9.1
     container_name: dots-ocr
-    restart: unless-stopped
+    restart: always
     ports:
       - "9105:8000"
     volumes:
@@ -35,10 +35,10 @@ services:
       - ./OCR:/app
     ports:
       - "9150:8000"
-    restart: on-failure
+    restart: always
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 10s
+      interval: 1h
       timeout: 3s
       retries: 3
       start_period: 10s
