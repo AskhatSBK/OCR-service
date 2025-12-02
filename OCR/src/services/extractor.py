@@ -91,7 +91,7 @@ class DotsOcrExtractor(Extractor):
                             input_path=temp_file_path,
                             output_dir=temp_output_dir,
                             fitz_preprocess=True,
-                            prompt_mode="prompt_ocr",
+                            prompt_mode=settings.PROMPT_MODE,
                         )
                         response_data = {}
                         for result in results:

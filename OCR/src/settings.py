@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     DOTS_OCR_PORT: int
     DOTS_OCR_HOST: str
     DOTS_OCR_MODEL: str
+    PROMPT_MODE: str
 
     OCR_MODE: str #DotsOCR Docling
 
