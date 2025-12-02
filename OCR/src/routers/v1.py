@@ -18,7 +18,7 @@ async def parse_file(
 ):
     """
     Парсинг файла с помощью DotsOCR
-    Поддерживаемые форматы: PDF, изображения (jpg, png, bmp, tiff, webp)
+    Поддерживаемые форматы:'.pdf','.jpg', '.jpeg', '.png', '.heic', '.doc', '.docx', '.heic', '.heif'
     """
     # Валидация типа файла
     allowed_extensions = {'.pdf','.jpg', '.jpeg', '.png', '.heic', '.doc', '.docx', '.heic', '.heif'}
@@ -48,7 +48,6 @@ async def parse_file(
                     ip=settings.DOTS_OCR_HOST,
                     port=settings.DOTS_OCR_PORT,
                     model_name=settings.DOTS_OCR_MODEL,
-
                 )
                 
                 # Парсинг файла
@@ -56,6 +55,7 @@ async def parse_file(
                     input_path=temp_file_path,
                     output_dir=temp_output_dir,
                     fitz_preprocess=True,
+                    prompt_mode=settings.PROMPT_MODE,
                 )
                 
                 # Подготовка ответа

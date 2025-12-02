@@ -83,15 +83,14 @@ class DotsOcrExtractor(Extractor):
                         parser = DotsOCRParser(
                             ip=settings.DOTS_OCR_HOST,
                             port=settings.DOTS_OCR_PORT,
-                            model_name=settings.DOTS_OCR_MODEL,
+                            model_name=settings.DOTS_OCR_MODEL
                         )
 
                         # Парсинг файла
                         results = parser.parse_file(
                             input_path=temp_file_path,
                             output_dir=temp_output_dir,
-                            fitz_preprocess=True,
-                            prompt_mode=settings.PROMPT_MODE,
+                            fitz_preprocess=True
                         )
                         response_data = {}
                         for result in results:
