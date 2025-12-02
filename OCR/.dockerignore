@@ -1,0 +1,8 @@
+.idea
+.venv
+.gitignore
+.git
+__pycache__/
+Dockerfile
+README.md
+nginx
