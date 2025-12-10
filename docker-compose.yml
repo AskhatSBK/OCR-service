@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   dots-ocr:
-    image: vllm/vllm-openai:nightly
+    image: vllm/vllm-openai:latest
     container_name: dots-ocr
     restart: always
     volumes:
@@ -20,8 +20,7 @@ services:
             --tensor-parallel-size 1 \
             --gpu-memory-utilization 0.2 \
             --chat-template-content-format string \
-            --served-model-name model \
-            --trust-remote-code
+            --served-model-name model
 
   service:
     build:
