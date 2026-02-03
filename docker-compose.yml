@@ -25,7 +25,6 @@ services:
   service:
     build:
       context: ./OCR
-    container_name: service
     volumes:
       - ./OCR:/app
     ports:
