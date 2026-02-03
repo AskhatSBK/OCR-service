@@ -293,15 +293,19 @@ class DotsOCRParser:
             results[i]['file_path'] = input_path
         return results
 
-    def parse_file(self, 
-        input_path, 
-        output_dir="", 
+    def parse_file(self,
+        input_path,
+        output_dir="",
         prompt_mode="prompt_layout_all_en",
         bbox=None,
         fitz_preprocess=False
         ):
         output_dir = output_dir or self.output_dir
         output_dir = os.path.abspath(output_dir)
+
+        # Preprocess: convert DOC/DOCX to PDF, HEIC/HEIF to PNG, normalize extensions
+        input_path = preprocess_path(input_path, workdir=output_dir, cleanup=False)
+
         filename, file_ext = os.path.splitext(os.path.basename(input_path))
         save_dir = os.path.join(output_dir, filename)
         os.makedirs(save_dir, exist_ok=True)
