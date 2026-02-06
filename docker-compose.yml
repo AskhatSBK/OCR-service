@@ -1,38 +1,15 @@
 version: '3.8'
-
-services:
-  dots-ocr:
-    image: vllm/vllm-openai:latest
-    container_name: dots-ocr
-    restart: always
-    volumes:
-      - ./model/weights/DotsOCR:/workspace/weights/DotsOCR
-    environment:
-      - PYTHONPATH=/workspace/weights:$PYTHONPATH
-      - NVIDIA_VISIBLE_DEVICES=1
-      - NVIDIA_DRIVER_CAPABILITIES=all
-    runtime: nvidia
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        exec vllm serve /workspace/weights/DotsOCR \
-            --tensor-parallel-size 1 \
-            --gpu-memory-utilization 0.2 \
-            --chat-template-content-format string \
-            --served-model-name model
-
-  service:
-    build:
-      context: ./OCR
-    volumes:
-      - ./OCR:/app
-    ports:
-      - "8000:8000"
-    restart: always
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 1h
-      timeout: 3s
-      retries: 3
-      start_period: 10s
+service:
+  build:
+    context: ./OCR
+  volumes:
+    - ./OCR:/app
+  ports:
+    - "8000:8000"
+  restart: always
+  healthcheck:
+    test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+    interval: 1h
+    timeout: 3s
+    retries: 3
+    start_period: 10s
