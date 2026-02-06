@@ -28,7 +28,7 @@ services:
     volumes:
       - ./OCR:/app
     ports:
-      - "8001:8000"
+      - "8000:8000"
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]

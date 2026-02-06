@@ -6,17 +6,19 @@ import os
 
 def inference_with_vllm(
         image,
-        prompt, 
+        prompt,
         ip="localhost",
         port=8008,
         temperature=0.1,
         top_p=0.9,
         max_completion_tokens=32768,
         model_name='model',
+        base_url='',
+        api_key='0',
         ):
-    
-    addr = f"http://{ip}:{port}/v1"
-    client = OpenAI(api_key="{}".format(os.environ.get("API_KEY", "0")), base_url=addr)
+
+    addr = base_url if base_url else f"http://{ip}:{port}/v1"
+    client = OpenAI(api_key=api_key, base_url=addr, max_retries=0)
     messages = []
     messages.append(
         {

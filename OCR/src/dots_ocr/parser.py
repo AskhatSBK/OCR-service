@@ -20,7 +20,7 @@ class DotsOCRParser:
     parse image or pdf file
     """
     
-    def __init__(self, 
+    def __init__(self,
             ip='0.0.0.0',
             port=8005,
             model_name='model',
@@ -28,11 +28,13 @@ class DotsOCRParser:
             top_p=1.0,
             max_completion_tokens=16384,
             num_thread=64,
-            dpi = 200, 
-            output_dir="./output", 
+            dpi = 200,
+            output_dir="./output",
             min_pixels=None,
             max_pixels=None,
             use_hf=False,
+            base_url='',
+            api_key='0',
         ):
         self.dpi = dpi
 
@@ -40,6 +42,8 @@ class DotsOCRParser:
         self.ip = ip
         self.port = port
         self.model_name = model_name
+        self.base_url = base_url
+        self.api_key = api_key
         # default args for inference
         self.temperature = temperature
         self.top_p = top_p
@@ -119,13 +123,15 @@ class DotsOCRParser:
     def _inference_with_vllm(self, image, prompt):
         response = inference_with_vllm(
             image,
-            prompt, 
+            prompt,
             model_name=self.model_name,
             ip=self.ip,
             port=self.port,
             temperature=self.temperature,
             top_p=self.top_p,
             max_completion_tokens=self.max_completion_tokens,
+            base_url=self.base_url,
+            api_key=self.api_key,
         )
         return response
 

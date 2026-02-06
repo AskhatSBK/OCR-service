@@ -83,7 +83,9 @@ class DotsOcrExtractor(Extractor):
                         parser = DotsOCRParser(
                             ip=settings.DOTS_OCR_HOST,
                             port=settings.DOTS_OCR_PORT,
-                            model_name=settings.DOTS_OCR_MODEL
+                            model_name=settings.DOTS_OCR_MODEL,
+                            base_url=settings.DOTS_OCR_BASE_URL,
+                            api_key=settings.DOTS_OCR_API_KEY,
                         )
 
                         # Парсинг файла
