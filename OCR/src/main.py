@@ -8,6 +8,7 @@ app = FastAPI(title='OCR Service',
 
 
 @app.get("/health", include_in_schema=False)
+@app.get("/ping", include_in_schema=False)
 async def health_check():
     return Response(status_code=200)
 
