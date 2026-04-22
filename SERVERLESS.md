@@ -58,12 +58,6 @@ When configuring the endpoint, add these environment variables:
 
 ## Step 3: Configure the Service
 
-```bash
-cp OCR/.env.example OCR/.env
-```
-
-Edit `OCR/.env`:
-
 ```env
 DOTS_OCR_BASE_URL=https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/openai/v1
 DOTS_OCR_API_KEY=your_runpod_api_key
@@ -79,13 +73,6 @@ ROOT_PATH=/
 | `DOTS_OCR_API_KEY` | Your RunPod API key. |
 | `DOTS_OCR_MODEL` | Must match `SERVED_MODEL_NAME` configured on the RunPod endpoint. |
 
-## Step 4: Run Service Only
-
-No local GPU needed — inference is handled by RunPod:
-
-```bash
-docker compose up service --build
-```
 
 ## Verify RunPod Endpoint
 
