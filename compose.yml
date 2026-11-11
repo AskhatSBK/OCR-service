@@ -43,9 +43,12 @@ services:
     logging: *default-logging
 
   service:
+    # Production: `docker compose pull service && docker compose up -d` uses the
+    # CI-built, tested image. Pin OCR_SERVICE_TAG (e.g. 1.1.0) in .env.
+    # Local dev: `docker compose up --build` builds from ./OCR instead.
+    image: ghcr.io/askhatsbk/ocr-service:${OCR_SERVICE_TAG:-latest}
     build:
       context: ./OCR
-    image: ocr-service:${OCR_SERVICE_TAG:-latest}
     container_name: ocr-service
     env_file:
       - path: ./OCR/.env

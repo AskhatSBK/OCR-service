@@ -17,6 +17,14 @@ docker compose up --build
 docker compose up -d
 ```
 
+### Deploy from GHCR (production)
+CI (`.github/workflows/image.yml`) builds, tests and pushes `ghcr.io/askhatsbk/ocr-service`:
+`latest` + `sha-<commit>` on merge to `main`, `X.Y.Z` / `X.Y` on tag `vX.Y.Z`. PRs only build + test.
+```bash
+echo "OCR_SERVICE_TAG=1.1.0" >> .env          # pin a released version
+docker compose pull service && docker compose up -d
+```
+
 ### Tests (run inside the image; needs libmagic + LibreOffice)
 ```bash
 cd OCR && docker build -t ocr-service:test .
