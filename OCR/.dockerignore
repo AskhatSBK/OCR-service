@@ -1,8 +1,14 @@
 .idea
 .venv
-.gitignore
 .git
+.gitignore
+.env
+.env.*
+!.env.example
 __pycache__/
+*.pyc
+.pytest_cache/
+tests/
 Dockerfile
 README.md
 nginx

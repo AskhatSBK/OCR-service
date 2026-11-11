@@ -1,13 +1,16 @@
 import argparse
 import atexit
-import logging
 import mimetypes
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Optional
+
+from loguru import logger
 
 # Optional content sniffer (libmagic). Falls back to mimetypes if unavailable.
 try:
@@ -25,8 +28,10 @@ try:
 except Exception:
     _HAVE_PIL_HEIF = False
 
-logger = logging.getLogger("preprocess")
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+
+class PreprocessError(RuntimeError):
+    """Input could not be normalised (corrupt file, conversion failure)."""
 
 
 def _mime_by_content(path: str) -> Optional[str]:
@@ -71,30 +76,54 @@ def _lowercase_ext_alias(src_path: str, workdir: str) -> str:
     return dst_path
 
 
-def convert_office_to_pdf(input_path: str, outdir: str, timeout_sec: int = 180) -> str:
+def convert_office_to_pdf(input_path: str, outdir: str, timeout_sec: int = 120) -> str:
     soffice = _find_soffice_cmd()
+    # A private LibreOffice profile per conversion: concurrent soffice
+    # processes sharing the default profile lock each other out and either
+    # fail silently or hang.
+    profile_dir = tempfile.mkdtemp(prefix="lo_profile_", dir=outdir)
     cmd = [
         soffice,
+        f"-env:UserInstallation={Path(profile_dir).as_uri()}",
         "--headless",
+        "--norestore",
+        "--nologo",
         "--convert-to", "pdf",
         "--outdir", outdir,
         input_path,
     ]
-    logger.info("Running: %s", " ".join(cmd))
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
+    logger.info("Running: {}", " ".join(cmd))
+    # New session so the whole soffice process tree can be killed on timeout.
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.communicate()
+        raise PreprocessError(f"LibreOffice conversion timed out after {timeout_sec}s")
+    finally:
+        shutil.rmtree(profile_dir, ignore_errors=True)
+
     if proc.returncode != 0:
-        raise RuntimeError(f"LibreOffice conversion failed (rc={proc.returncode}): {proc.stderr.strip() or proc.stdout.strip()}")
+        raise PreprocessError(
+            f"LibreOffice conversion failed (rc={proc.returncode}): {stderr.strip() or stdout.strip()}"
+        )
     base = os.path.splitext(os.path.basename(input_path))[0]
     pdf_path = os.path.join(outdir, f"{base}.pdf")
     if not os.path.exists(pdf_path):
-        raise RuntimeError("LibreOffice reported success, but output PDF not found.")
+        raise PreprocessError("LibreOffice could not convert the document (corrupt or unsupported file).")
     logger.info(f"DOC/DOCX → PDF: {pdf_path}")
     return pdf_path
 
 
 def convert_heif_to_png(input_path: str, outdir: str) -> str:
     if not _HAVE_PIL_HEIF:
-        raise RuntimeError("pillow-heif/Pillow not available; cannot convert HEIC/HEIF.")
+        raise PreprocessError("pillow-heif/Pillow not available; cannot convert HEIC/HEIF.")
     with Image.open(input_path) as im:
         # Fix common EXIF orientation issues and strip the orientation tag
         im = ImageOps.exif_transpose(im)
@@ -113,7 +142,12 @@ def convert_heif_to_png(input_path: str, outdir: str) -> str:
         return out_path
 
 
-def preprocess_path(input_path: str, workdir: Optional[str] = None, cleanup: bool = False) -> str:
+def preprocess_path(
+    input_path: str,
+    workdir: Optional[str] = None,
+    cleanup: bool = False,
+    office_timeout_sec: int = 120,
+) -> str:
     """
     Normalize an input path into a dots.ocr-friendly file:
       - lowercase extension alias for case-sensitive checks
@@ -148,14 +182,14 @@ def preprocess_path(input_path: str, workdir: Optional[str] = None, cleanup: boo
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/msword",
     } or ext in {".docx", ".doc"}:
-        return convert_office_to_pdf(use_path, tmpdir)
+        return convert_office_to_pdf(use_path, tmpdir, timeout_sec=office_timeout_sec)
 
     # HEIC/HEIF
     if mime in {"image/heif", "image/heic", "image/heif-sequence", "image/heic-sequence"} or ext in {".heic", ".heif"}:
         return convert_heif_to_png(use_path, tmpdir)
 
     # Supported images: ensure lowercase extension only
-    if ext in {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".webp"} or mime.startswith("image/"):
+    if ext in {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".webp", ".gif"} or mime.startswith("image/"):
         return use_path
 
     # Unknown type: last resort—just return the lowercase alias

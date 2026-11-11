@@ -1,0 +1,68 @@
+name: ocr-service
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  dots-ocr:
+    # Pinned to vLLM v0.32.0 (newest stable), CUDA 12.9 build: the plain v0.32.0 tag is
+    # CUDA 13 and needs NVIDIA driver >= 580; cu129 runs on driver >= 575.
+    # --trust-remote-code is required: vLLM v0.32 refuses to parse this model's config
+    # without it (verified). It runs configuration_dots.py shipped with the weights.
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.32.0-cu129}
+    container_name: dots-ocr
+    restart: unless-stopped
+    volumes:
+      # dots.mocr by default; set OCR_MODEL_DIR=DotsOCR to roll back to dots.ocr.
+      # Folder names must not contain dots (model-loader quirk upstream).
+      - ./model/weights/${OCR_MODEL_DIR:-DotsMOCR}:/workspace/weights/model:ro
+    environment:
+      - PYTHONPATH=/workspace/weights
+      - NVIDIA_VISIBLE_DEVICES=${OCR_GPU_DEVICE:-1}
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    runtime: nvidia
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        exec vllm serve /workspace/weights/model \
+            --tensor-parallel-size 1 \
+            --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.2} \
+            --chat-template-content-format string \
+            --served-model-name model \
+            --trust-remote-code
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 300s   # model load / CUDA graph capture
+    logging: *default-logging
+
+  service:
+    build:
+      context: ./OCR
+    image: ocr-service:${OCR_SERVICE_TAG:-latest}
+    container_name: ocr-service
+    env_file:
+      - path: ./OCR/.env
+        required: false
+    ports:
+      - "${OCR_PUBLISH_PORT:-8001}:8000"
+    depends_on:
+      dots-ocr:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 2m
+    tmpfs:
+      - /tmp:size=2g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging: *default-logging
