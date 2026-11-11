@@ -1,6 +1,6 @@
 [project]
 name = "ocr"
-version = "0.1.0"
+version = "1.1.0"
 description = ""
 authors = [
     {name = "Murat99010",email = "Murat99010@gmail.com"}
@@ -26,6 +26,17 @@ dependencies = [
     "python-magic (>=0.4.27,<0.5.0)"
 ]
 
+
+
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 
 [build-system]

@@ -1,24 +1,31 @@
+"""Download OCR model weights to <repo>/model/weights/<dir>, the path compose.yml mounts.
+
+    python dots.ocr/tools/download_model.py                       # dots.mocr -> model/weights/DotsMOCR
+    python dots.ocr/tools/download_model.py -n rednote-hilab/dots.ocr -d DotsOCR
+
+Folder names must not contain '.' (upstream model-loader quirk).
+"""
 from argparse import ArgumentParser
 import os
 
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--type', '-t', type=str, default="huggingface")
-    parser.add_argument('--name', '-n', type=str, default="rednote-hilab/dots.ocr")
+    parser.add_argument('--type', '-t', type=str, default="huggingface", choices=["huggingface", "modelscope"])
+    parser.add_argument('--name', '-n', type=str, default="dots-studio/dots.mocr")
+    parser.add_argument('--dir', '-d', type=str, default="DotsMOCR",
+                        help="Folder under model/weights; must match OCR_MODEL_DIR in compose")
     args = parser.parse_args()
-    script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    print(f"Attention: The model save dir dots.ocr should be replace by a name without `.` like DotsOCR, util we merge our code to transformers.")
-    model_dir = os.path.join(script_dir, "weights/DotsOCR")
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
+    if "." in args.dir:
+        parser.error("--dir must not contain '.'")
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    model_dir = os.path.join(repo_root, "model", "weights", args.dir)
+    os.makedirs(model_dir, exist_ok=True)
     if args.type == "huggingface":
         from huggingface_hub import snapshot_download
-        snapshot_download(repo_id=args.name, local_dir=model_dir, local_dir_use_symlinks=False, resume_download=True)
-    elif args.type == "modelscope":
-        from modelscope import snapshot_download
         snapshot_download(repo_id=args.name, local_dir=model_dir)
     else:
-        raise ValueError(f"Invalid type: {args.type}")
-    
+        from modelscope import snapshot_download
+        snapshot_download(repo_id=args.name, local_dir=model_dir)
+
     print(f"model downloaded to {model_dir}")

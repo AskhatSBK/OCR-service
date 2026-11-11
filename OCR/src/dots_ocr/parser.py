@@ -1,44 +1,64 @@
 import os
 import json
-from tqdm import tqdm
+import time
 from multiprocessing.pool import ThreadPool
 import argparse
 
+import fitz
+from loguru import logger
 
-from src.dots_ocr.model.inference import inference_with_vllm
+
+from src.dots_ocr.model.inference import inference_with_vllm, InferenceTimeout
 from src.dots_ocr.utils.consts import image_extensions, MIN_PIXELS, MAX_PIXELS
 from src.dots_ocr.utils.image_utils import get_image_by_fitz_doc, fetch_image, smart_resize
-from src.dots_ocr.utils.doc_utils import load_images_from_pdf
+from src.dots_ocr.utils.doc_utils import fitz_doc_to_image
 from src.dots_ocr.utils.prompts import dict_promptmode_to_prompt
 from src.dots_ocr.utils.layout_utils import post_process_output, draw_layout_on_image, pre_process_bboxes
 from src.dots_ocr.utils.format_transformer import layoutjson2md
 
 from .preprocess import preprocess_path
 
+class UnsupportedDocumentError(ValueError):
+    """Input file type cannot be parsed."""
+
+
 class DotsOCRParser:
     """
     parse image or pdf file
     """
     
-    def __init__(self, 
+    def __init__(self,
             ip='0.0.0.0',
             port=8005,
             model_name='model',
             temperature=0.1,
             top_p=1.0,
             max_completion_tokens=16384,
-            num_thread=64,
-            dpi = 200, 
-            output_dir="./output", 
+            num_thread=8,
+            dpi = 200,
+            output_dir="./output",
             min_pixels=None,
             max_pixels=None,
             use_hf=False,
+            base_url='',
+            api_key='0',
+            timeout=180.0,
+            max_retries=2,
+            office_timeout=120,
+            deadline=None,
         ):
         self.dpi = dpi
+        # Absolute time.monotonic() after which no new page is sent to vLLM.
+        self.deadline = deadline
+        self.office_timeout = office_timeout
 
         # default args for vllm server
         self.ip = ip
         self.port = port
+        self.base_url = base_url or f"http://{ip}:{port}/v1"
+        self.api_key = api_key
+        self.timeout = timeout
+        self.max_retries = max_retries
         self.model_name = model_name
         # default args for inference
         self.temperature = temperature
@@ -54,8 +74,6 @@ class DotsOCRParser:
             # self._load_hf_model()
             # print(f"use hf model, num_thread will be set to 1")
             ...
-        else:
-            print(f"use vllm model, num_thread will be set to {self.num_thread}")
         assert self.min_pixels is None or self.min_pixels >= MIN_PIXELS
         assert self.max_pixels is None or self.max_pixels <= MAX_PIXELS
 
@@ -117,15 +135,23 @@ class DotsOCRParser:
         return response
 
     def _inference_with_vllm(self, image, prompt):
+        timeout = self.timeout
+        if self.deadline is not None:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 1:
+                raise InferenceTimeout("request deadline exceeded before all pages were OCR'd")
+            timeout = min(timeout, remaining)
         response = inference_with_vllm(
             image,
-            prompt, 
+            prompt,
+            base_url=self.base_url,
+            api_key=self.api_key,
             model_name=self.model_name,
-            ip=self.ip,
-            port=self.port,
             temperature=self.temperature,
             top_p=self.top_p,
             max_completion_tokens=self.max_completion_tokens,
+            timeout=timeout,
+            max_retries=self.max_retries,
         )
         return response
 
@@ -208,7 +234,7 @@ class DotsOCRParser:
                 try:
                     image_with_layout = draw_layout_on_image(origin_image, cells)
                 except Exception as e:
-                    print(f"Error drawing layout on image: {e}")
+                    logger.warning(f"Error drawing layout on image: {e}")
                     image_with_layout = origin_image
 
                 json_file_path = os.path.join(save_dir, f"{save_name}.json")
@@ -235,13 +261,8 @@ class DotsOCRParser:
                         'md_content_nohf_path': md_nohf_file_path,
                     })
         else:
-            image_layout_path = os.path.join(save_dir, f"{save_name}.jpg")
-            origin_image.save(image_layout_path)
-            result.update({
-                'layout_image_path': image_layout_path,
-            })
-
             md_content = response
+            result['md_content'] = md_content
             md_file_path = os.path.join(save_dir, f"{save_name}.md")
             with open(md_file_path, "w", encoding="utf-8") as md_file:
                 md_file.write(md_content)
@@ -257,72 +278,70 @@ class DotsOCRParser:
         result['file_path'] = input_path
         return [result]
         
-    def parse_pdf(self, input_path, filename, prompt_mode, save_dir):
-        print(f"loading pdf: {input_path}")
-        images_origin = load_images_from_pdf(input_path, dpi=self.dpi)
-        total_pages = len(images_origin)
-        tasks = [
-            {
-                "origin_image": image,
-                "prompt_mode": prompt_mode,
-                "save_dir": save_dir,
-                "save_name": filename,
-                "source":"pdf",
-                "page_idx": i,
-            } for i, image in enumerate(images_origin)
-        ]
+    def parse_pdf(self, input_path, filename, prompt_mode, save_dir, max_pages=None):
+        with fitz.open(input_path) as doc:
+            total_pages = doc.page_count
+            pages_to_parse = total_pages if max_pages is None else min(total_pages, max_pages)
+            logger.info(f"Parsing PDF with {total_pages} pages ({pages_to_parse} to OCR)")
+            if pages_to_parse == 0:
+                return [], total_pages
 
-        def _execute_task(task_args):
-            return self._parse_single_image(**task_args)
+            def _execute_task(page_idx):
+                # Render lazily inside the worker so only `num_thread` page
+                # bitmaps live in memory at once, not the whole document.
+                with fitz.open(input_path) as worker_doc:
+                    image = fitz_doc_to_image(worker_doc[page_idx], target_dpi=self.dpi)
+                return self._parse_single_image(
+                    origin_image=image,
+                    prompt_mode=prompt_mode,
+                    save_dir=save_dir,
+                    save_name=filename,
+                    source="pdf",
+                    page_idx=page_idx,
+                )
 
-        if self.use_hf:
-            num_thread =  1
-        else:
-            num_thread = min(total_pages, self.num_thread)
-        print(f"Parsing PDF with {total_pages} pages using {num_thread} threads...")
+            num_thread = 1 if self.use_hf else min(pages_to_parse, self.num_thread)
+            with ThreadPool(num_thread) as pool:
+                # imap (not imap_unordered) keeps page order; the first page
+                # failure re-raises here and aborts the whole document.
+                results = list(pool.imap(_execute_task, range(pages_to_parse)))
 
-        results = []
-        with ThreadPool(num_thread) as pool:
-            with tqdm(total=total_pages, desc="Processing PDF pages") as pbar:
-                for result in pool.imap_unordered(_execute_task, tasks):
-                    results.append(result)
-                    pbar.update(1)
-
-        results.sort(key=lambda x: x["page_no"])
-        for i in range(len(results)):
-            results[i]['file_path'] = input_path
-        return results
+        for result in results:
+            result['file_path'] = input_path
+        return results, total_pages
 
     def parse_file(self,
         input_path,
         output_dir="",
         prompt_mode="prompt_layout_all_en",
         bbox=None,
-        fitz_preprocess=False
+        fitz_preprocess=False,
+        max_pages=None,
         ):
+        """Parse a document. Returns (results, total_pages)."""
         output_dir = output_dir or self.output_dir
         output_dir = os.path.abspath(output_dir)
 
         # Preprocess: convert DOC/DOCX to PDF, HEIC/HEIF to PNG, normalize extensions
-        input_path = preprocess_path(input_path, workdir=output_dir, cleanup=False)
+        input_path = preprocess_path(
+            input_path, workdir=output_dir, cleanup=False, office_timeout_sec=self.office_timeout,
+        )
 
         filename, file_ext = os.path.splitext(os.path.basename(input_path))
         save_dir = os.path.join(output_dir, filename)
         os.makedirs(save_dir, exist_ok=True)
 
         if file_ext == '.pdf':
-            results = self.parse_pdf(input_path, filename, prompt_mode, save_dir)
+            results, total_pages = self.parse_pdf(input_path, filename, prompt_mode, save_dir, max_pages=max_pages)
         elif file_ext in image_extensions:
             results = self.parse_image(input_path, filename, prompt_mode, save_dir, bbox=bbox, fitz_preprocess=fitz_preprocess)
+            total_pages = 1
         else:
-            raise ValueError(f"file extension {file_ext} not supported, supported extensions are {image_extensions} and pdf")
-        
-        print(f"Parsing finished, results saving to {save_dir}")
-        with open(os.path.join(output_dir, os.path.basename(filename)+'.jsonl'), 'w', encoding="utf-8") as w:
-            for result in results:
-                w.write(json.dumps(result, ensure_ascii=False) + '\n')
+            raise UnsupportedDocumentError(
+                f"file extension {file_ext} not supported, supported extensions are {sorted(image_extensions)} and .pdf"
+            )
 
-        return results
+        return results, total_pages
 
 
 
@@ -423,7 +442,7 @@ def main():
     fitz_preprocess = not args.no_fitz_preprocess
     if fitz_preprocess:
         print(f"Using fitz preprocess for image input, check the change of the image pixels")
-    result = dots_ocr_parser.parse_file(
+    result, _ = dots_ocr_parser.parse_file(
         normalized_input_path, 
         prompt_mode=args.prompt,
         bbox=args.bbox,
