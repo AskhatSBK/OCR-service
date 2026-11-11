@@ -17,6 +17,16 @@ docker compose up --build
 docker compose up -d
 ```
 
+### Podman (GPU host without Docker)
+`compose.podman.yml` is a standalone Podman variant (GPU via CDI, no pod, local build):
+```bash
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml   # once per host / driver update
+cp OCR/.env.example OCR/.env
+BUILDAH_FORMAT=docker podman compose -f compose.podman.yml build
+podman compose -f compose.podman.yml up -d
+```
+Keep its vLLM command in sync with `compose.yml`.
+
 ### Deploy from GHCR (production)
 CI (`.github/workflows/image.yml`) builds, tests and pushes `ghcr.io/askhatsbk/ocr-service`:
 `latest` + `sha-<commit>` on merge to `main`, `X.Y.Z` / `X.Y` on tag `vX.Y.Z`. PRs only build + test.

@@ -1,0 +1,91 @@
+# Podman variant of compose.yml (standalone — use it instead of compose.yml, not on top of it).
+#
+#   cp OCR/.env.example OCR/.env            # once; required by env_file below
+#   BUILDAH_FORMAT=docker podman compose -f compose.podman.yml build   # docker format keeps HEALTHCHECK
+#   podman compose -f compose.podman.yml up -d
+#
+# One-time host setup for the GPU (NVIDIA Container Toolkit, CDI):
+#   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+#   nvidia-ctk cdi list                     # must list nvidia.com/gpu=<index>
+#
+# Differences from compose.yml:
+#   - GPU via CDI device (nvidia.com/gpu=N) instead of Docker's `runtime: nvidia`
+#   - SELinux: GPU container runs with label=disable (NVIDIA's documented Podman
+#     setup); the service has no bind mounts, so nothing needs relabeling
+#   - Logging via Podman's k8s-file driver (max-size only; Podman has no max-file)
+#   - Service image is built locally (localhost/ocr-service), never pulled
+#   - No pod: podman-compose would put both containers in one pod (shared network),
+#     and vLLM and the service both listen on :8000 inside their containers
+#
+# podman-compose limitations (as of 1.6): depends_on health conditions only order
+# startup (the service answers 502 / /ready=503 until vLLM is up), and
+# stop_grace_period is ignored (Podman's default 10s stop timeout applies).
+# Keep the vLLM command and service settings in sync with compose.yml.
+
+name: ocr-service
+
+x-podman:
+  in_pod: false
+
+services:
+  dots-ocr:
+    image: ${VLLM_IMAGE:-docker.io/vllm/vllm-openai:v0.32.0-cu129}
+    container_name: dots-ocr
+    restart: unless-stopped
+    devices:
+      # Same index as NVIDIA_VISIBLE_DEVICES in compose.yml; "all" for every GPU.
+      - nvidia.com/gpu=${OCR_GPU_DEVICE:-1}
+    security_opt:
+      - label=disable
+    volumes:
+      # dots.mocr by default; OCR_MODEL_DIR=DotsOCR rolls back to dots.ocr.
+      - ./model/weights/${OCR_MODEL_DIR:-DotsMOCR}:/workspace/weights/model:ro
+    environment:
+      - PYTHONPATH=/workspace/weights
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        exec vllm serve /workspace/weights/model \
+            --tensor-parallel-size 1 \
+            --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.2} \
+            --chat-template-content-format string \
+            --served-model-name model \
+            --trust-remote-code
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    logging:
+      driver: k8s-file
+      options:
+        max-size: "20mb"
+
+  service:
+    image: localhost/ocr-service:${OCR_SERVICE_TAG:-latest}
+    build:
+      context: ./OCR
+    container_name: ocr-service
+    env_file:
+      - ./OCR/.env
+    ports:
+      - "${OCR_PUBLISH_PORT:-8001}:8000"
+    depends_on:
+      dots-ocr:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 2m
+    tmpfs:
+      - /tmp:size=2g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: k8s-file
+      options:
+        max-size: "20mb"
